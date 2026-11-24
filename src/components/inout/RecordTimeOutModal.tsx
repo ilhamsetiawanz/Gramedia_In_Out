@@ -13,10 +13,18 @@ interface RecordTimeOutModalProps {
 
 const PURPOSES: InOutPurpose[] = [
   'Istirahat',
+  'Antar Barang',
+  'Gudang',
+  'Lain - Lain',
+  'Ke Sekolah',
+  'Sebar Brosur',
+  'Pameran',
+  'Sholat',
+  'Toilet',
+  'Tukar Uang',
   'Tugas Luar',
   'Keperluan Pribadi',
   'Medis',
-  'Lainnya',
 ];
 
 export const RecordTimeOutModal: React.FC<RecordTimeOutModalProps> = ({

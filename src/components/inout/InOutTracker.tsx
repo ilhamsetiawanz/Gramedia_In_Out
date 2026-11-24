@@ -233,6 +233,15 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
           >
             <option value="all">Semua Keperluan</option>
             <option value="Istirahat">Istirahat</option>
+            <option value="Antar Barang">Antar Barang</option>
+            <option value="Gudang">Gudang</option>
+            <option value="Lain - Lain">Lain - Lain</option>
+            <option value="Ke Sekolah">Ke Sekolah</option>
+            <option value="Sebar Brosur">Sebar Brosur</option>
+            <option value="Pameran">Pameran</option>
+            <option value="Sholat">Sholat</option>
+            <option value="Toilet">Toilet</option>
+            <option value="Tukar Uang">Tukar Uang</option>
             <option value="Tugas Luar">Tugas Luar</option>
             <option value="Keperluan Pribadi">Keperluan Pribadi</option>
             <option value="Medis">Medis</option>

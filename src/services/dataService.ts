@@ -302,6 +302,22 @@ export async function updateDailyWorkStatus(
 }
 
 // ================= IN-OUT LOGS (KELUAR MASUK ISTIRAHAT) =================
+function parsePurposeAndNotes(rawPurpose: string, rawNotes?: string | null): { purpose: InOutPurpose; notes: string } {
+  if (rawNotes && rawNotes.startsWith('[Keperluan: ')) {
+    const match = rawNotes.match(/^\[Keperluan:\s*([^\]]+)\](?:\s*(.*))?$/s);
+    if (match) {
+      return {
+        purpose: match[1] as InOutPurpose,
+        notes: (match[2] || '').trim(),
+      };
+    }
+  }
+  return {
+    purpose: rawPurpose as InOutPurpose,
+    notes: (rawNotes || '').trim(),
+  };
+}
+
 export async function getInOutLogs(dateStr: string = getTodayDateString()): Promise<InOutLog[]> {
   const employees = await getEmployees();
   const empMap = new Map(employees.map((e) => [e.id, e]));
@@ -315,10 +331,15 @@ export async function getInOutLogs(dateStr: string = getTodayDateString()): Prom
         .eq('date', dateStr)
         .order('time_out', { ascending: false });
       if (!error && data) {
-        return data.map((item) => ({
-          ...item,
-          employee: empMap.get(item.employee_id),
-        })) as InOutLog[];
+        return data.map((item) => {
+          const parsed = parsePurposeAndNotes(item.purpose, item.notes);
+          return {
+            ...item,
+            purpose: parsed.purpose,
+            notes: parsed.notes,
+            employee: empMap.get(item.employee_id),
+          };
+        }) as InOutLog[];
       }
     } catch (e) {
       console.warn('Supabase in-out logs fetch failed, fallback to local', e);
@@ -362,21 +383,47 @@ export async function recordTimeOut(
   const supabase = getSupabaseClient();
   if (isSupabaseConfigured() && supabase) {
     try {
-      const { data, error } = await supabase
+      let payload: Record<string, unknown> = {
+        employee_id: employeeId,
+        date: dateStr,
+        time_out: timeOutStr,
+        purpose,
+        notes: notes.trim() || null,
+        is_overdue: false,
+      };
+
+      let { data, error } = await supabase
         .from('in_out_logs')
-        .insert([{
-          employee_id: employeeId,
-          date: dateStr,
-          time_out: timeOutStr,
-          purpose,
-          notes,
-          is_overdue: false,
-        }])
+        .insert([payload])
         .select()
         .single();
+
+      // Jika database Supabase masih memiliki check constraint lama (code 23514)
+      if (error && (error.code === '23514' || error.message?.includes('check constraint'))) {
+        const encodedNotes = `[Keperluan: ${purpose}]${notes.trim() ? ' ' + notes.trim() : ''}`;
+        payload = {
+          ...payload,
+          purpose: 'Lainnya',
+          notes: encodedNotes,
+        };
+        const retry = await supabase
+          .from('in_out_logs')
+          .insert([payload])
+          .select()
+          .single();
+        data = retry.data;
+        error = retry.error;
+      }
+
       if (!error && data) {
         await updateDailyWorkStatus(employeeId, 'out_break', dateStr);
-        return { ...data, employee: emp } as InOutLog;
+        const parsed = parsePurposeAndNotes(data.purpose, data.notes);
+        return { 
+          ...data, 
+          purpose: parsed.purpose, 
+          notes: parsed.notes, 
+          employee: emp 
+        } as InOutLog;
       }
     } catch (e) {
       console.warn('Supabase record time out failed, using local', e);
@@ -410,10 +457,11 @@ export async function recordTimeIn(
       const { data: dbLog } = await supabase.from('in_out_logs').select('*').eq('id', logId).single();
       const actualLog = dbLog || target;
       if (actualLog) {
+        const parsed = parsePurposeAndNotes(actualLog.purpose, actualLog.notes);
         const emp = empMap.get(actualLog.employee_id);
         const maxBreak = emp ? emp.max_break_minutes : 60;
         const duration = calculateMinutesDiff(actualLog.time_out, timeInStr);
-        const isOverdue = actualLog.purpose === 'Istirahat' && duration > maxBreak;
+        const isOverdue = parsed.purpose === 'Istirahat' && duration > maxBreak;
 
         const { data, error } = await supabase
           .from('in_out_logs')
@@ -427,7 +475,13 @@ export async function recordTimeIn(
           .single();
         if (!error && data) {
           await updateDailyWorkStatus(actualLog.employee_id, 'working', actualLog.date);
-          return { ...data, employee: emp } as InOutLog;
+          const parsedResult = parsePurposeAndNotes(data.purpose, data.notes);
+          return { 
+            ...data, 
+            purpose: parsedResult.purpose, 
+            notes: parsedResult.notes, 
+            employee: emp 
+          } as InOutLog;
         }
       }
     } catch (e) {
@@ -437,10 +491,11 @@ export async function recordTimeIn(
 
   if (!target) throw new Error('Data keluar-masuk tidak ditemukan');
 
+  const parsedTarget = parsePurposeAndNotes(target.purpose, target.notes);
   const emp = empMap.get(target.employee_id);
   const maxBreak = emp ? emp.max_break_minutes : 60;
   const duration = calculateMinutesDiff(target.time_out, timeInStr);
-  const isOverdue = target.purpose === 'Istirahat' && duration > maxBreak;
+  const isOverdue = parsedTarget.purpose === 'Istirahat' && duration > maxBreak;
 
   const updatedLogs = allLogs.map((l) => {
     if (l.id === logId) {
@@ -512,10 +567,15 @@ export async function getMonthlyRecords(yearMonth: string): Promise<{
         employee: empMap.get(w.employee_id),
       })) as DailyWorkLog[];
 
-      const inOutData = (inOutRes.data || []).map((io) => ({
-        ...io,
-        employee: empMap.get(io.employee_id),
-      })) as InOutLog[];
+      const inOutData = (inOutRes.data || []).map((io) => {
+        const parsed = parsePurposeAndNotes(io.purpose, io.notes);
+        return {
+          ...io,
+          purpose: parsed.purpose,
+          notes: parsed.notes,
+          employee: empMap.get(io.employee_id),
+        };
+      }) as InOutLog[];
 
       return {
         employees,

@@ -41,7 +41,7 @@ CREATE TABLE IF NOT EXISTS public.in_out_logs (
     time_out TIME NOT NULL,                         -- Jam Keluar
     time_in TIME,                                  -- Jam Masuk Kembali
     duration_minutes INTEGER,                       -- Total Waktu Keluar (menit)
-    purpose VARCHAR(50) NOT NULL DEFAULT 'Istirahat' CHECK (purpose IN ('Istirahat', 'Tugas Luar', 'Keperluan Pribadi', 'Medis', 'Lainnya')),
+    purpose VARCHAR(50) NOT NULL DEFAULT 'Istirahat', -- Istirahat, Antar Barang, Gudang, Lain - Lain, Ke Sekolah, Sebar Brosur, Pameran, Sholat, Toilet, Tukar Uang, dll.
     notes TEXT,
     is_overdue BOOLEAN NOT NULL DEFAULT false,      -- Warning jika melebihi batas istirahat
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL

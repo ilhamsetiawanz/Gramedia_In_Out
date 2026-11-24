@@ -98,34 +98,40 @@ export function generateDailyPDFReport({
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(30, 58, 95);
-  doc.text('1. DAFTAR KARYAWAN YANG BEKERJA PADA HARI INI', 14, 71);
+  doc.text('1. DAFTAR KARYAWAN YANG MASUK / BEKERJA PADA HARI INI', 14, 71);
 
-  const workTableBody = employees.map((emp, index) => {
-    const workLog = workLogs.find((w) => w.employee_id === emp.id);
-    const isPresent = Boolean(workLog);
-    const activeOut = inOutLogs.find((l) => l.employee_id === emp.id && !l.time_in);
-    
-    let statusText = 'Belum Hadir';
-    if (isPresent) {
-      if (workLog?.status === 'completed') statusText = 'Selesai Shift';
-      else if (activeOut) statusText = `Sedang di Luar (${activeOut.purpose})`;
-      else statusText = 'Bekerja di Tempat';
-    }
+  // Filter khusus karyawan yang hadir/masuk pada hari tersebut
+  const workingEmployees = employees.filter((emp) => 
+    workLogs.some((w) => w.employee_id === emp.id)
+  );
 
-    return [
-      String(index + 1),
-      emp.nik || emp.nip || '-',
-      emp.name,
-      emp.department,
-      isPresent ? workLog?.shift_start || '-' : '-',
-      isPresent ? workLog?.shift_end || '-' : '-',
-      statusText,
-    ];
-  });
+  const workTableBody = workingEmployees.length === 0
+    ? [['-', '-', 'Belum ada karyawan yang melakukan Clock In pada tanggal ini', '-', '-', '-', '-', '-']]
+    : workingEmployees.map((emp, index) => {
+        const workLog = workLogs.find((w) => w.employee_id === emp.id);
+        const activeOut = inOutLogs.find((l) => l.employee_id === emp.id && !l.time_in);
+        
+        let statusText = 'Bekerja di Tempat';
+        if (workLog?.status === 'completed') statusText = 'Selesai Shift';
+        else if (activeOut) statusText = `Di Luar (${activeOut.purpose})`;
+
+        const shiftDisplay = workLog?.shift_name || workLog?.notes || 'Shift Pagi';
+
+        return [
+          String(index + 1),
+          emp.nik || emp.nip || '-',
+          emp.name,
+          emp.department,
+          shiftDisplay,
+          workLog?.shift_start || '-',
+          workLog?.shift_end || '-',
+          statusText,
+        ];
+      });
 
   autoTable(doc, {
     startY: 74,
-    head: [['No', 'NIK', 'Nama Karyawan', 'Departemen', 'Clock In', 'Clock Out', 'Status Keberadaan']],
+    head: [['No', 'NIK', 'Nama Karyawan', 'Departemen', 'Shift Kerja', 'Clock In', 'Clock Out', 'Status']],
     body: workTableBody,
     theme: 'grid',
     headStyles: {
@@ -141,13 +147,14 @@ export function generateDailyPDFReport({
       cellPadding: 2,
     },
     columnStyles: {
-      0: { halign: 'center', cellWidth: 10 },
-      1: { halign: 'center', cellWidth: 20 },
-      2: { fontStyle: 'bold', cellWidth: 42 },
-      3: { cellWidth: 48 },
-      4: { halign: 'center', cellWidth: 18 },
-      5: { halign: 'center', cellWidth: 18 },
-      6: { halign: 'center', cellWidth: 26 },
+      0: { halign: 'center', cellWidth: 8 },
+      1: { halign: 'center', cellWidth: 18 },
+      2: { fontStyle: 'bold', cellWidth: 38 },
+      3: { cellWidth: 38 },
+      4: { halign: 'center', fontStyle: 'bold', cellWidth: 24 },
+      5: { halign: 'center', cellWidth: 17 },
+      6: { halign: 'center', cellWidth: 17 },
+      7: { halign: 'center', cellWidth: 22 },
     },
     margin: { left: 14, right: 14 },
   });
@@ -253,15 +260,16 @@ export function generateDailyPDFReport({
   doc.setTextColor(71, 85, 105);
   doc.setFont('helvetica', 'normal');
 
-  doc.text('Mengetahui / Menyetujui,', 140, signY);
-  doc.text('Store Manager Gramedia', 140, signY + 5);
+  doc.text(`Kendari, ${formattedDate}`, 135, signY - 5);
+  doc.text('Mengetahui / Menyetujui,', 135, signY);
+  doc.text('Store Manager Gramedia Kendari', 135, signY + 5);
 
-  doc.line(140, signY + 28, 190, signY + 28);
+  doc.line(135, signY + 28, 195, signY + 28);
   doc.setFont('helvetica', 'bold');
-  doc.text('Budi Santoso', 140, signY + 33);
+  doc.text(adminName || 'Gramedia Kendari', 135, signY + 33);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
-  doc.text('NIP. GRM-001', 140, signY + 37);
+  doc.text('Pimpinan Toko / Admin Operasional', 135, signY + 37);
 
   // Footer text on all pages
   const totalPages = (doc as any).internal.getNumberOfPages();

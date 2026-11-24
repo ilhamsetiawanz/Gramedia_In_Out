@@ -154,8 +154,12 @@ const MainApp: React.FC = () => {
   };
 
   // Handlers for Daily Work Logs (Kehadiran Harian)
-  const handleMarkAttendance = async (employeeId: string, shiftStart: string = '08:00') => {
-    await markEmployeeAttendance(employeeId, selectedDate, shiftStart, 'working');
+  const handleMarkAttendance = async (
+    employeeId: string, 
+    shiftName: string = 'Shift Pagi', 
+    shiftStart?: string
+  ) => {
+    await markEmployeeAttendance(employeeId, selectedDate, shiftName, shiftStart, 'working');
     await loadData();
   };
 

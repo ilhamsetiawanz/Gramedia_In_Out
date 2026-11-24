@@ -24,7 +24,7 @@ interface DashboardOverviewProps {
   onOpenTimeOutModal: (employeeId?: string) => void;
   onOpenTimeInModal: (log?: InOutLog) => void;
   onOpenReportTab: () => void;
-  onMarkAttendance: (employeeId: string, shiftStart?: string) => Promise<void>;
+  onMarkAttendance: (employeeId: string, shiftName: string, shiftStart?: string) => Promise<void>;
   onUpdateWorkStatus: (employeeId: string, status: WorkStatus, shiftEnd?: string) => Promise<void>;
 }
 

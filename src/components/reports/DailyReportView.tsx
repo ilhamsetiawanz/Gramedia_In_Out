@@ -7,10 +7,14 @@ import {
   AlertTriangle, 
   CheckCircle2, 
   Clock, 
-  Users 
+  Users,
+  FileSpreadsheet,
+  Download
 } from 'lucide-react';
 import { formatIndonesianDate, formatDuration } from '../../utils/dateUtils';
 import { generateDailyPDFReport } from '../../services/pdfReportService';
+import { generateMonthlyExcelReport } from '../../services/excelReportService';
+import { getMonthlyRecords } from '../../services/dataService';
 
 interface DailyReportViewProps {
   selectedDate: string;
@@ -29,7 +33,11 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
   inOutLogs,
   adminName,
 }) => {
-  const [isExporting, setIsExporting] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+
+  // Default month for 1 month Excel export
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => selectedDate.slice(0, 7));
 
   const empMap = new Map(employees.map((e) => [e.id, e]));
 
@@ -43,7 +51,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
 
   const handleDownloadPDF = () => {
     try {
-      setIsExporting(true);
+      setIsExportingPDF(true);
       generateDailyPDFReport({
         date: selectedDate,
         employees,
@@ -55,13 +63,31 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
       console.error('Error generating PDF:', e);
       alert('Gagal menghasilkan dokumen PDF.');
     } finally {
-      setIsExporting(false);
+      setIsExportingPDF(false);
+    }
+  };
+
+  const handleDownloadExcel = async () => {
+    try {
+      setIsExportingExcel(true);
+      const monthlyData = await getMonthlyRecords(selectedMonth);
+      generateMonthlyExcelReport({
+        yearMonth: selectedMonth,
+        employees: monthlyData.employees.length > 0 ? monthlyData.employees : employees,
+        workLogs: monthlyData.workLogs,
+        inOutLogs: monthlyData.inOutLogs,
+      });
+    } catch (e) {
+      console.error('Error generating Excel report:', e);
+      alert('Gagal mengekspor laporan bulanan Excel.');
+    } finally {
+      setIsExportingExcel(false);
     }
   };
 
   return (
     <div className="space-y-6">
-      {/* Top Action Header */}
+      {/* Top Action Header: Laporan Harian & Ekspor PDF */}
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wider text-blue-700">
@@ -69,10 +95,10 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
           </div>
           <h2 className="text-xl font-bold text-[#1e293b] mt-0.5 flex items-center">
             <FileDown className="w-5 h-5 mr-2 text-blue-600" />
-            Laporan Harian Presensi & Keluar Masuk
+            Laporan Presensi & Log Keluar Masuk
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Rekap kehadiran kerja harian, pergerakan keluar-masuk karyawan, dan catatan kepatuhan istirahat.
+            Rekap kehadiran harian (PDF) dan ekspor data 1 bulan penuh (Excel) dengan shift kerja.
           </p>
         </div>
 
@@ -84,16 +110,55 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
               value={selectedDate}
               onChange={(e) => onSelectDate(e.target.value)}
               className="bg-transparent text-slate-800 font-medium focus:outline-none cursor-pointer"
+              title="Pilih tanggal laporan harian"
             />
           </div>
 
           <button
             onClick={handleDownloadPDF}
-            disabled={isExporting}
+            disabled={isExportingPDF}
             className="inline-flex items-center px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
           >
             <Printer className="w-4 h-4 mr-2" />
-            {isExporting ? 'Menyiapkan PDF...' : 'Download Laporan PDF'}
+            {isExportingPDF ? 'Menyiapkan PDF...' : 'Download Laporan Harian (PDF)'}
+          </button>
+        </div>
+      </div>
+
+      {/* Ekspor Excel 1 Bulan Penuh Section */}
+      <div className="bg-[#f0f4f9] p-5 rounded-xl border border-blue-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0">
+            <FileSpreadsheet className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">
+              Ekspor Rekapitulasi Presensi 1 Bulan (Format Excel .xlsx)
+            </h3>
+            <p className="text-xs text-slate-600 mt-0.5">
+              Menghasilkan berkas Excel 2 sheet: rekap jam kerja & shift dan log keluar masuk & istirahat selama satu bulan.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-3 shrink-0">
+          <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-lg border border-slate-300 text-xs">
+            <span className="text-slate-500 font-medium">Bulan:</span>
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="bg-transparent text-slate-800 font-semibold focus:outline-none cursor-pointer"
+            />
+          </div>
+
+          <button
+            onClick={handleDownloadExcel}
+            disabled={isExportingExcel}
+            className="inline-flex items-center px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors cursor-pointer"
+          >
+            <Download className="w-4 h-4 mr-2" />
+            {isExportingExcel ? 'Membuat Excel...' : 'Download Rekap Excel (1 Bulan)'}
           </button>
         </div>
       </div>
@@ -167,6 +232,7 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
                 <th className="py-2.5 px-4 w-12 text-center">No</th>
                 <th className="py-2.5 px-4">NIK & Nama</th>
                 <th className="py-2.5 px-4">Departemen</th>
+                <th className="py-2.5 px-4 text-center">Shift Kerja</th>
                 <th className="py-2.5 px-4 text-center">Jam Masuk (Clock In)</th>
                 <th className="py-2.5 px-4 text-center">Jam Pulang (Clock Out)</th>
                 <th className="py-2.5 px-4 text-center">Status Kehadiran</th>
@@ -176,6 +242,8 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
               {employees.map((emp, index) => {
                 const work = workLogs.find((w) => w.employee_id === emp.id);
                 const isPresent = Boolean(work);
+                const shiftDisplay = work ? (work.shift_name || work.notes || 'Shift Pagi') : '-';
+
                 return (
                   <tr key={emp.id} className="hover:bg-slate-50/60">
                     <td className="py-2.5 px-4 text-center text-slate-400 font-mono">{index + 1}</td>
@@ -184,6 +252,15 @@ export const DailyReportView: React.FC<DailyReportViewProps> = ({
                     </td>
                     <td className="py-2.5 px-4 text-slate-700 font-medium">
                       {emp.department}
+                    </td>
+                    <td className="py-2.5 px-4 text-center">
+                      {isPresent ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                          {shiftDisplay}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400 font-mono">-</span>
+                      )}
                     </td>
                     <td className="py-2.5 px-4 text-center font-mono text-slate-800">
                       {isPresent ? work?.shift_start : '-'}

@@ -27,8 +27,20 @@ function saveLocal<T>(key: string, data: T) {
   }
 }
 
-// Inisialisasi local storage jika belum ada
+// Inisialisasi local storage & pembersihan data dummy
 export function initializeStorage() {
+  try {
+    // Bersihkan data dummy lama (Budi Santoso, emp-1, GRM-xxx) jika ada di localStorage
+    const rawEmp = localStorage.getItem(STORAGE_KEY_EMPLOYEES);
+    if (rawEmp && (rawEmp.includes('emp-1') || rawEmp.includes('GRM-') || rawEmp.includes('Budi Santoso'))) {
+      localStorage.removeItem(STORAGE_KEY_EMPLOYEES);
+      localStorage.removeItem(STORAGE_KEY_WORKLOGS);
+      localStorage.removeItem(STORAGE_KEY_INOUT);
+    }
+  } catch (e) {
+    console.warn('Gagal membersihkan data dummy lama', e);
+  }
+
   if (!localStorage.getItem(STORAGE_KEY_EMPLOYEES)) {
     saveLocal(STORAGE_KEY_EMPLOYEES, INITIAL_EMPLOYEES);
   }
@@ -49,7 +61,7 @@ export async function getEmployees(): Promise<Employee[]> {
         .from('employees')
         .select('*')
         .order('name', { ascending: true });
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         return data.map((item) => ({
           ...item,
           nik: item.nik || item.nip || '-',
@@ -61,9 +73,9 @@ export async function getEmployees(): Promise<Employee[]> {
     }
   }
 
-  // Fallback local
+  // Fallback local bersih
   initializeStorage();
-  const local = loadLocal<Employee[]>(STORAGE_KEY_EMPLOYEES, INITIAL_EMPLOYEES);
+  const local = loadLocal<Employee[]>(STORAGE_KEY_EMPLOYEES, []);
   return local.map((item) => ({
     ...item,
     nik: item.nik || item.nip || '-',
@@ -112,7 +124,7 @@ export async function addEmployee(employee: Omit<Employee, 'id' | 'created_at'>)
   }
 
   // Local fallback
-  const local = loadLocal<Employee[]>(STORAGE_KEY_EMPLOYEES, INITIAL_EMPLOYEES);
+  const local = loadLocal<Employee[]>(STORAGE_KEY_EMPLOYEES, []);
   const updated = [newRecord, ...local];
   saveLocal(STORAGE_KEY_EMPLOYEES, updated);
   return newRecord;
@@ -136,7 +148,7 @@ export async function updateEmployee(id: string, updates: Partial<Employee>): Pr
     }
   }
 
-  const local = loadLocal<Employee[]>(STORAGE_KEY_EMPLOYEES, INITIAL_EMPLOYEES);
+  const local = loadLocal<Employee[]>(STORAGE_KEY_EMPLOYEES, []);
   const updated = local.map((emp) => (emp.id === id ? { ...emp, ...updates } : emp));
   saveLocal(STORAGE_KEY_EMPLOYEES, updated);
   const found = updated.find((e) => e.id === id);
@@ -154,12 +166,12 @@ export async function deleteEmployee(id: string): Promise<boolean> {
     }
   }
 
-  const local = loadLocal<Employee[]>(STORAGE_KEY_EMPLOYEES, INITIAL_EMPLOYEES);
+  const local = loadLocal<Employee[]>(STORAGE_KEY_EMPLOYEES, []);
   saveLocal(STORAGE_KEY_EMPLOYEES, local.filter((e) => e.id !== id));
   return true;
 }
 
-// ================= DAILY WORK LOGS (KEHADIRAN HARI INI) =================
+// ================= DAILY WORK LOGS (KEHADIRAN HARI INI & SHIFT) =================
 export async function getDailyWorkLogs(dateStr: string = getTodayDateString()): Promise<DailyWorkLog[]> {
   const employees = await getEmployees();
   const empMap = new Map(employees.map((e) => [e.id, e]));
@@ -174,6 +186,7 @@ export async function getDailyWorkLogs(dateStr: string = getTodayDateString()): 
       if (!error && data) {
         return data.map((item) => ({
           ...item,
+          shift_name: item.shift_name || item.notes || 'Shift Pagi',
           employee: empMap.get(item.employee_id),
         })) as DailyWorkLog[];
       }
@@ -184,10 +197,11 @@ export async function getDailyWorkLogs(dateStr: string = getTodayDateString()): 
 
   // Local fallback
   initializeStorage();
-  const allLogs = loadLocal<DailyWorkLog[]>(STORAGE_KEY_WORKLOGS, getInitialWorkLogs());
+  const allLogs = loadLocal<DailyWorkLog[]>(STORAGE_KEY_WORKLOGS, []);
   const filtered = allLogs.filter((l) => l.date === dateStr);
   return filtered.map((l) => ({
     ...l,
+    shift_name: l.shift_name || l.notes || 'Shift Pagi',
     employee: empMap.get(l.employee_id),
   }));
 }
@@ -195,6 +209,7 @@ export async function getDailyWorkLogs(dateStr: string = getTodayDateString()): 
 export async function markEmployeeAttendance(
   employeeId: string,
   dateStr: string = getTodayDateString(),
+  shiftName: string = 'Shift Pagi',
   shiftStart?: string,
   status: WorkStatus = 'working'
 ): Promise<DailyWorkLog> {
@@ -203,35 +218,51 @@ export async function markEmployeeAttendance(
     id: `work-${Date.now()}`,
     employee_id: employeeId,
     date: dateStr,
+    shift_name: shiftName,
     shift_start: clockInTime,
     shift_end: null,
     status,
+    notes: shiftName,
   };
 
   const supabase = getSupabaseClient();
   if (isSupabaseConfigured() && supabase) {
     try {
+      const payload: Record<string, unknown> = {
+        employee_id: employeeId,
+        date: dateStr,
+        shift_start: clockInTime,
+        status,
+        notes: shiftName,
+      };
+
       const { data, error } = await supabase
         .from('daily_work_logs')
-        .upsert([{
-          employee_id: employeeId,
-          date: dateStr,
-          shift_start: clockInTime,
-          status,
-        }], { onConflict: 'employee_id,date' })
+        .upsert([payload], { onConflict: 'employee_id,date' })
         .select()
         .single();
-      if (!error && data) return data as DailyWorkLog;
+      if (!error && data) {
+        return {
+          ...data,
+          shift_name: data.shift_name || data.notes || shiftName,
+        } as DailyWorkLog;
+      }
     } catch (e) {
       console.warn('Supabase attendance failed, using local', e);
     }
   }
 
   // Local fallback
-  const allLogs = loadLocal<DailyWorkLog[]>(STORAGE_KEY_WORKLOGS, getInitialWorkLogs());
+  const allLogs = loadLocal<DailyWorkLog[]>(STORAGE_KEY_WORKLOGS, []);
   const existingIdx = allLogs.findIndex((l) => l.employee_id === employeeId && l.date === dateStr);
   if (existingIdx >= 0) {
-    allLogs[existingIdx] = { ...allLogs[existingIdx], status, shift_start: clockInTime };
+    allLogs[existingIdx] = { 
+      ...allLogs[existingIdx], 
+      status, 
+      shift_start: clockInTime, 
+      shift_name: shiftName,
+      notes: shiftName 
+    };
   } else {
     allLogs.push(newRecord);
   }
@@ -261,7 +292,7 @@ export async function updateDailyWorkStatus(
     }
   }
 
-  const allLogs = loadLocal<DailyWorkLog[]>(STORAGE_KEY_WORKLOGS, getInitialWorkLogs());
+  const allLogs = loadLocal<DailyWorkLog[]>(STORAGE_KEY_WORKLOGS, []);
   const idx = allLogs.findIndex((l) => l.employee_id === employeeId && l.date === dateStr);
   if (idx >= 0) {
     allLogs[idx].status = status;
@@ -270,7 +301,7 @@ export async function updateDailyWorkStatus(
   }
 }
 
-// ================= IN-OUT LOGS (KELUAR MASUK) =================
+// ================= IN-OUT LOGS (KELUAR MASUK ISTIRAHAT) =================
 export async function getInOutLogs(dateStr: string = getTodayDateString()): Promise<InOutLog[]> {
   const employees = await getEmployees();
   const empMap = new Map(employees.map((e) => [e.id, e]));
@@ -296,7 +327,7 @@ export async function getInOutLogs(dateStr: string = getTodayDateString()): Prom
 
   // Local fallback
   initializeStorage();
-  const allLogs = loadLocal<InOutLog[]>(STORAGE_KEY_INOUT, getInitialInOutLogs());
+  const allLogs = loadLocal<InOutLog[]>(STORAGE_KEY_INOUT, []);
   const filtered = allLogs.filter((l) => l.date === dateStr);
   return filtered.map((l) => ({
     ...l,
@@ -344,7 +375,6 @@ export async function recordTimeOut(
         .select()
         .single();
       if (!error && data) {
-        // Update daily work status to out_break
         await updateDailyWorkStatus(employeeId, 'out_break', dateStr);
         return { ...data, employee: emp } as InOutLog;
       }
@@ -354,11 +384,10 @@ export async function recordTimeOut(
   }
 
   // Local fallback
-  const allLogs = loadLocal<InOutLog[]>(STORAGE_KEY_INOUT, getInitialInOutLogs());
+  const allLogs = loadLocal<InOutLog[]>(STORAGE_KEY_INOUT, []);
   const updated = [newLog, ...allLogs];
   saveLocal(STORAGE_KEY_INOUT, updated);
 
-  // Update daily work log to out_break
   await updateDailyWorkStatus(employeeId, 'out_break', dateStr);
   return newLog;
 }
@@ -370,9 +399,42 @@ export async function recordTimeIn(
   const employees = await getEmployees();
   const empMap = new Map(employees.map((e) => [e.id, e]));
 
-  // Ambil log target
-  const allLogs = loadLocal<InOutLog[]>(STORAGE_KEY_INOUT, getInitialInOutLogs());
+  const allLogs = loadLocal<InOutLog[]>(STORAGE_KEY_INOUT, []);
   const target = allLogs.find((l) => l.id === logId);
+
+  // Jika di supabase
+  const supabase = getSupabaseClient();
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      // Ambil log dari supabase jika tidak ada di local
+      const { data: dbLog } = await supabase.from('in_out_logs').select('*').eq('id', logId).single();
+      const actualLog = dbLog || target;
+      if (actualLog) {
+        const emp = empMap.get(actualLog.employee_id);
+        const maxBreak = emp ? emp.max_break_minutes : 60;
+        const duration = calculateMinutesDiff(actualLog.time_out, timeInStr);
+        const isOverdue = actualLog.purpose === 'Istirahat' && duration > maxBreak;
+
+        const { data, error } = await supabase
+          .from('in_out_logs')
+          .update({
+            time_in: timeInStr,
+            duration_minutes: duration,
+            is_overdue: isOverdue,
+          })
+          .eq('id', logId)
+          .select()
+          .single();
+        if (!error && data) {
+          await updateDailyWorkStatus(actualLog.employee_id, 'working', actualLog.date);
+          return { ...data, employee: emp } as InOutLog;
+        }
+      }
+    } catch (e) {
+      console.warn('Supabase record time in failed, updating local', e);
+    }
+  }
+
   if (!target) throw new Error('Data keluar-masuk tidak ditemukan');
 
   const emp = empMap.get(target.employee_id);
@@ -380,29 +442,6 @@ export async function recordTimeIn(
   const duration = calculateMinutesDiff(target.time_out, timeInStr);
   const isOverdue = target.purpose === 'Istirahat' && duration > maxBreak;
 
-  const supabase = getSupabaseClient();
-  if (isSupabaseConfigured() && supabase) {
-    try {
-      const { data, error } = await supabase
-        .from('in_out_logs')
-        .update({
-          time_in: timeInStr,
-          duration_minutes: duration,
-          is_overdue: isOverdue,
-        })
-        .eq('id', logId)
-        .select()
-        .single();
-      if (!error && data) {
-        await updateDailyWorkStatus(target.employee_id, 'working', target.date);
-        return { ...data, employee: emp } as InOutLog;
-      }
-    } catch (e) {
-      console.warn('Supabase record time in failed, updating local', e);
-    }
-  }
-
-  // Local fallback
   const updatedLogs = allLogs.map((l) => {
     if (l.id === logId) {
       return {
@@ -416,7 +455,6 @@ export async function recordTimeIn(
   });
   saveLocal(STORAGE_KEY_INOUT, updatedLogs);
 
-  // Set status kembali working di daily work log
   await updateDailyWorkStatus(target.employee_id, 'working', target.date);
 
   const updatedTarget = updatedLogs.find((l) => l.id === logId)!;
@@ -433,14 +471,86 @@ export async function deleteInOutLog(id: string): Promise<boolean> {
     }
   }
 
-  const allLogs = loadLocal<InOutLog[]>(STORAGE_KEY_INOUT, getInitialInOutLogs());
+  const allLogs = loadLocal<InOutLog[]>(STORAGE_KEY_INOUT, []);
   saveLocal(STORAGE_KEY_INOUT, allLogs.filter((l) => l.id !== id));
   return true;
 }
 
-// Reset data to defaults
-export function resetDemoData() {
-  saveLocal(STORAGE_KEY_EMPLOYEES, INITIAL_EMPLOYEES);
-  saveLocal(STORAGE_KEY_WORKLOGS, getInitialWorkLogs());
-  saveLocal(STORAGE_KEY_INOUT, getInitialInOutLogs());
+// ================= DATA BULANAN (UNTUK EXCEL 1 BULAN) =================
+export async function getMonthlyRecords(yearMonth: string): Promise<{
+  employees: Employee[];
+  workLogs: DailyWorkLog[];
+  inOutLogs: InOutLog[];
+}> {
+  const employees = await getEmployees();
+  const empMap = new Map(employees.map((e) => [e.id, e]));
+
+  const startDate = `${yearMonth}-01`;
+  const endDate = `${yearMonth}-31`;
+
+  const supabase = getSupabaseClient();
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      const [workRes, inOutRes] = await Promise.all([
+        supabase
+          .from('daily_work_logs')
+          .select('*')
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .order('date', { ascending: true }),
+        supabase
+          .from('in_out_logs')
+          .select('*')
+          .gte('date', startDate)
+          .lte('date', endDate)
+          .order('date', { ascending: true }),
+      ]);
+
+      const workData = (workRes.data || []).map((w) => ({
+        ...w,
+        shift_name: w.shift_name || w.notes || 'Shift Pagi',
+        employee: empMap.get(w.employee_id),
+      })) as DailyWorkLog[];
+
+      const inOutData = (inOutRes.data || []).map((io) => ({
+        ...io,
+        employee: empMap.get(io.employee_id),
+      })) as InOutLog[];
+
+      return {
+        employees,
+        workLogs: workData,
+        inOutLogs: inOutData,
+      };
+    } catch (e) {
+      console.warn('Supabase monthly fetch failed, fallback to local', e);
+    }
+  }
+
+  // Local fallback
+  const allWorkLogs = loadLocal<DailyWorkLog[]>(STORAGE_KEY_WORKLOGS, []);
+  const allInOutLogs = loadLocal<InOutLog[]>(STORAGE_KEY_INOUT, []);
+
+  const monthWorkLogs = allWorkLogs
+    .filter((l) => l.date.startsWith(yearMonth))
+    .map((l) => ({
+      ...l,
+      shift_name: l.shift_name || l.notes || 'Shift Pagi',
+      employee: empMap.get(l.employee_id),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const monthInOutLogs = allInOutLogs
+    .filter((l) => l.date.startsWith(yearMonth))
+    .map((l) => ({
+      ...l,
+      employee: empMap.get(l.employee_id),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  return {
+    employees,
+    workLogs: monthWorkLogs,
+    inOutLogs: monthInOutLogs,
+  };
 }

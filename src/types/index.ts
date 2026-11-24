@@ -31,13 +31,16 @@ export interface InOutLog {
 
 export type WorkStatus = 'working' | 'out_break' | 'completed' | 'leave';
 
+export type ShiftType = 'Shift Pagi' | 'Shift Middle' | 'Shift Siang' | string;
+
 export interface DailyWorkLog {
   id: string;
   employee_id: string;
   employee?: Employee;
   date: string; // YYYY-MM-DD
-  shift_start: string; // HH:mm
-  shift_end: string | null;
+  shift_name?: string; // Shift Pagi, Shift Middle, Shift Siang
+  shift_start: string; // Jam Clock In
+  shift_end: string | null; // Jam Clock Out
   status: WorkStatus;
   notes?: string;
   created_at?: string;

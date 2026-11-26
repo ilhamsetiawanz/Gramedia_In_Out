@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { ShieldCheck, Mail, Lock, LogIn, AlertCircle } from 'lucide-react';
+import { WatermarkFooter } from '../common/WatermarkFooter';
 
 export const LoginPage: React.FC = () => {
   const { login } = useAuth();
@@ -117,6 +118,8 @@ export const LoginPage: React.FC = () => {
             </div>
           </form>
         </div>
+
+        <WatermarkFooter variant="login" />
       </div>
     </div>
   );

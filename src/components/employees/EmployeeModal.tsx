@@ -33,6 +33,13 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const departmentOptions = React.useMemo(() => {
+    if (initialData?.department && !DEPARTMENTS.includes(initialData.department)) {
+      return [initialData.department, ...DEPARTMENTS];
+    }
+    return DEPARTMENTS;
+  }, [initialData]);
+
   useEffect(() => {
     if (initialData) {
       setNik(initialData.nik || initialData.nip || '');
@@ -161,7 +168,7 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
               onChange={(e) => setDepartment(e.target.value)}
               className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
             >
-              {DEPARTMENTS.map((dept) => (
+              {departmentOptions.map((dept) => (
                 <option key={dept} value={dept}>
                   {dept}
                 </option>
@@ -176,9 +183,9 @@ export const EmployeeModal: React.FC<EmployeeModalProps> = ({
             <div className="flex items-center space-x-2">
               <input
                 type="number"
-                min={15}
+                min={1}
                 max={180}
-                step={5}
+                step={1}
                 required
                 value={maxBreakMinutes}
                 onChange={(e) => setMaxBreakMinutes(Number(e.target.value))}

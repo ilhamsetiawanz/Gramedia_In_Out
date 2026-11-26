@@ -78,6 +78,39 @@ export function getCurrentAdmin(): AdminUser | null {
   }
 }
 
+export async function verifyAdminPassword(email: string, password: string): Promise<boolean> {
+  const trimmedEmail = email.trim();
+  if (!password) {
+    throw new Error('Silakan masukkan kata sandi akun untuk melanjutkan.');
+  }
+
+  const supabase = getSupabaseClient();
+  if (isSupabaseConfigured() && supabase) {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: trimmedEmail,
+      password,
+    });
+
+    if (error) {
+      throw new Error('Kata sandi akun tidak sesuai. Penghapusan data dibatalkan.');
+    }
+
+    if (data && data.user) {
+      return true;
+    }
+  }
+
+  // Fallback jika Supabase offline
+  if (
+    (trimmedEmail.toLowerCase() === 'kendari.gramediakendari.vm@gmail.com' && password === 'Gramedia123') ||
+    (trimmedEmail.toLowerCase() === 'admin@gramedia.com' && password === 'admin123')
+  ) {
+    return true;
+  }
+
+  throw new Error('Kata sandi akun tidak sesuai. Penghapusan data dibatalkan.');
+}
+
 export async function logoutAdmin(): Promise<void> {
   const supabase = getSupabaseClient();
   if (isSupabaseConfigured() && supabase) {

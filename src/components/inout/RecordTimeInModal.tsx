@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import type { InOutLog } from '../../types';
 import { LogIn, X, Clock, AlertTriangle, CheckCircle2, AlertCircle, Lock } from 'lucide-react';
 import { 
-  getCurrentTimeString, 
-  calculateMinutesDiff, 
-  formatDuration 
+  getCurrentTimeWithSeconds, 
+  calculateSecondsDiff, 
+  formatDuration,
+  formatElapsedTimer 
 } from '../../utils/dateUtils';
 
 interface RecordTimeInModalProps {
@@ -23,13 +24,21 @@ export const RecordTimeInModal: React.FC<RecordTimeInModalProps> = ({
   onSubmit,
 }) => {
   const [currentLogId, setCurrentLogId] = useState('');
-  const [timeIn, setTimeIn] = useState(getCurrentTimeString());
+  const [timeIn, setTimeIn] = useState(getCurrentTimeWithSeconds());
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    if (!isOpen) return;
+    setTimeIn(getCurrentTimeWithSeconds());
+    const interval = setInterval(() => {
+      setTimeIn(getCurrentTimeWithSeconds());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isOpen]);
+
+  useEffect(() => {
     if (isOpen) {
-      setTimeIn(getCurrentTimeString());
       setError(null);
       if (selectedLog) {
         setCurrentLogId(selectedLog.id);
@@ -39,7 +48,8 @@ export const RecordTimeInModal: React.FC<RecordTimeInModalProps> = ({
         setCurrentLogId('');
       }
     }
-  }, [isOpen, selectedLog, activeLogs]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, selectedLog]);
 
   if (!isOpen) return null;
 
@@ -47,11 +57,17 @@ export const RecordTimeInModal: React.FC<RecordTimeInModalProps> = ({
   const employee = currentLog?.employee;
   const maxBreakMinutes = employee?.max_break_minutes || 60;
 
-  // Kalkulasi durasi realtime
-  const durationMinutes = currentLog ? calculateMinutesDiff(currentLog.time_out, timeIn) : 0;
+  // Kalkulasi durasi realtime hingga detik
+  const elapsedSeconds = currentLog ? calculateSecondsDiff(currentLog.time_out, timeIn) : 0;
+  const durationMinutes = Math.floor(elapsedSeconds / 60);
   const isBreakPurpose = currentLog?.purpose === 'Istirahat';
-  const isOverdue = isBreakPurpose && durationMinutes > maxBreakMinutes;
-  const excessMinutes = durationMinutes - maxBreakMinutes;
+  const isOverdue = isBreakPurpose && elapsedSeconds > maxBreakMinutes * 60;
+  const excessSeconds = Math.max(0, elapsedSeconds - maxBreakMinutes * 60);
+  const excessMinutes = Math.floor(excessSeconds / 60);
+  const excessRemSeconds = excessSeconds % 60;
+  const excessLabel = excessMinutes > 0
+    ? `${excessMinutes} menit${excessRemSeconds > 0 ? ` ${excessRemSeconds} detik` : ''}`
+    : `${excessRemSeconds} detik`;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -172,8 +188,8 @@ export const RecordTimeInModal: React.FC<RecordTimeInModalProps> = ({
                     <Clock className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
                     Total Durasi di Luar:
                   </span>
-                  <span className="text-sm font-bold text-slate-900">
-                    {formatDuration(durationMinutes)} ({durationMinutes} Menit)
+                  <span className="text-sm font-bold text-slate-900 font-mono">
+                    {formatElapsedTimer(elapsedSeconds)} ({formatDuration(durationMinutes)})
                   </span>
                 </div>
 
@@ -186,14 +202,14 @@ export const RecordTimeInModal: React.FC<RecordTimeInModalProps> = ({
                         PERINGATAN: Melebihi Batas Istirahat!
                       </div>
                       <div className="text-[11px] text-amber-700 mt-0.5">
-                        Karyawan istirahat selama {durationMinutes} menit (batas: {maxBreakMinutes} menit). 
-                        Terlambat <strong>{excessMinutes} menit</strong>. Status pelanggaran akan dicatat dalam laporan.
+                        Karyawan istirahat selama {formatElapsedTimer(elapsedSeconds)} (batas: {maxBreakMinutes} menit). 
+                        Terlambat <strong>{excessLabel}</strong>. Status pelanggaran akan dicatat dalam laporan.
                       </div>
                     </div>
                   </div>
                 )}
 
-                {isBreakPurpose && !isOverdue && durationMinutes > 0 && (
+                {isBreakPurpose && !isOverdue && elapsedSeconds > 0 && (
                   <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-[11px] flex items-center space-x-1.5">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                     <span>Waktu istirahat tepat waktu (masih dalam batas {maxBreakMinutes} menit).</span>

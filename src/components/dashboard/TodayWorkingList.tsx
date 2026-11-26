@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { Employee, DailyWorkLog, InOutLog, WorkStatus } from '../../types';
 import { 
   CheckCircle2, 
@@ -12,7 +12,12 @@ import {
   Clock,
   CalendarCheck
 } from 'lucide-react';
-import { getCurrentTimeString } from '../../utils/dateUtils';
+import { 
+  getCurrentTimeString, 
+  getCurrentTimeWithSeconds, 
+  calculateSecondsDiff, 
+  formatElapsedTimer 
+} from '../../utils/dateUtils';
 import { ClockInModal } from './ClockInModal';
 
 interface TodayWorkingListProps {
@@ -40,6 +45,14 @@ export const TodayWorkingList: React.FC<TodayWorkingListProps> = ({
   // State Modal Clock In
   const [isClockInModalOpen, setIsClockInModalOpen] = useState(false);
   const [selectedEmpForClockIn, setSelectedEmpForClockIn] = useState<string | null>(null);
+  const [nowTime, setNowTime] = useState(getCurrentTimeWithSeconds());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowTime(getCurrentTimeWithSeconds());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const workLogMap = new Map(workLogs.map((l) => [l.employee_id, l]));
 
@@ -47,18 +60,35 @@ export const TodayWorkingList: React.FC<TodayWorkingListProps> = ({
   const employeeAttendanceData = employees.map((emp) => {
     const workLog = workLogMap.get(emp.id);
     const empInOutLogs = inOutLogs.filter((l) => l.employee_id === emp.id);
+    const maxBreak = emp.max_break_minutes || 60;
     
     // Cek apakah karyawan sedang di luar kantor
     const activeOutLog = empInOutLogs.find((l) => !l.time_in);
+    const activeElapsedSeconds = activeOutLog
+      ? calculateSecondsDiff(activeOutLog.time_out, nowTime)
+      : 0;
+    const isLiveOverdue = Boolean(
+      activeOutLog &&
+      activeOutLog.purpose === 'Istirahat' &&
+      activeElapsedSeconds > maxBreak * 60
+    );
     
-    // Cek apakah ada pelanggaran istirahat hari ini
-    const hasOverdueBreak = empInOutLogs.some((l) => l.is_overdue);
+    // Cek apakah ada pelanggaran istirahat hari ini (selesai atau sedang berjalan)
+    const hasOverdueBreak = empInOutLogs.some((l) => {
+      if (l.purpose !== 'Istirahat') return false;
+      if (l.time_in) {
+        return l.is_overdue || (l.duration_minutes || 0) > maxBreak || calculateSecondsDiff(l.time_out, l.time_in) > maxBreak * 60;
+      }
+      return calculateSecondsDiff(l.time_out, nowTime) > maxBreak * 60;
+    });
 
     return {
       employee: emp,
       isWorkingToday: Boolean(workLog),
       workLog,
       activeOutLog,
+      activeElapsedSeconds,
+      isLiveOverdue,
       hasOverdueBreak,
       inOutCount: empInOutLogs.length,
       status: workLog ? workLog.status : 'not_started',
@@ -185,7 +215,7 @@ export const TodayWorkingList: React.FC<TodayWorkingListProps> = ({
               </tr>
             ) : (
               filteredData.map((item) => {
-                const { employee, isWorkingToday, workLog, activeOutLog, hasOverdueBreak } = item;
+                const { employee, isWorkingToday, workLog, activeOutLog, activeElapsedSeconds, isLiveOverdue, hasOverdueBreak } = item;
                 const nik = employee.nik || employee.nip || '-';
                 const shiftName = workLog?.shift_name || workLog?.notes || '-';
 
@@ -265,9 +295,14 @@ export const TodayWorkingList: React.FC<TodayWorkingListProps> = ({
                           Selesai (Clock Out)
                         </span>
                       ) : activeOutLog ? (
-                        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-300">
-                          <Coffee className="w-3 h-3 mr-1 text-amber-600 shrink-0" />
-                          Sedang di Luar ({activeOutLog.time_out})
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
+                          isLiveOverdue
+                            ? 'bg-red-50 text-red-700 border-red-300'
+                            : 'bg-amber-50 text-amber-800 border-amber-300'
+                        }`}>
+                          <Coffee className={`w-3 h-3 mr-1 shrink-0 ${isLiveOverdue ? 'text-red-600' : 'text-amber-600'}`} />
+                          <span>Di Luar • </span>
+                          <span className="font-mono ml-1 font-bold">{formatElapsedTimer(activeElapsedSeconds)}</span>
                         </span>
                       ) : (
                         <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -349,7 +384,7 @@ export const TodayWorkingList: React.FC<TodayWorkingListProps> = ({
       </div>
       <div className="p-3 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between">
         <span>Total Hadir: {employeeAttendanceData.filter((e) => e.isWorkingToday).length} dari {employees.length} karyawan</span>
-        <span>Waktu saat ini: {currentTime} WIB (otomatis tercatat real-time tanpa manipulasi)</span>
+        <span>Waktu saat ini: <span className="font-mono font-semibold">{nowTime}</span> WIB (otomatis tercatat real-time tanpa manipulasi)</span>
       </div>
 
       {/* Modal Absen Masuk (Clock In) */}

@@ -9,6 +9,7 @@ import { RecordTimeOutModal } from './components/inout/RecordTimeOutModal';
 import { RecordTimeInModal } from './components/inout/RecordTimeInModal';
 import { EmployeeModal } from './components/employees/EmployeeModal';
 import { SupabaseSettingsModal } from './components/common/SupabaseSettingsModal';
+import { WatermarkFooter } from './components/common/WatermarkFooter';
 
 import type { 
   Employee, 
@@ -80,6 +81,7 @@ const MainApp: React.FC = () => {
 
   // Modals
   const [isTimeOutModalOpen, setIsTimeOutModalOpen] = useState(false);
+  const [preselectedEmpForTimeOut, setPreselectedEmpForTimeOut] = useState<string | null>(null);
   const [isTimeInModalOpen, setIsTimeInModalOpen] = useState(false);
   const [selectedLogForTimeIn, setSelectedLogForTimeIn] = useState<InOutLog | null>(null);
   
@@ -380,6 +382,8 @@ const MainApp: React.FC = () => {
               <LogOut className="w-4 h-4" />
             </button>
           </div>
+
+          <WatermarkFooter variant={isSidebarCollapsed ? 'sidebar-collapsed' : 'sidebar'} />
         </div>
       </aside>
 
@@ -428,7 +432,10 @@ const MainApp: React.FC = () => {
 
             {/* Quick Add Outing button */}
             <button
-              onClick={() => setIsTimeOutModalOpen(true)}
+              onClick={() => {
+                setPreselectedEmpForTimeOut(null);
+                setIsTimeOutModalOpen(true);
+              }}
               className="hidden sm:inline-flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-xs transition-colors cursor-pointer"
             >
               <Clock className="w-3.5 h-3.5 mr-1.5" />
@@ -445,7 +452,8 @@ const MainApp: React.FC = () => {
               workLogs={workLogs}
               inOutLogs={inOutLogs}
               selectedDate={selectedDate}
-              onOpenTimeOutModal={() => {
+              onOpenTimeOutModal={(empId) => {
+                setPreselectedEmpForTimeOut(empId || null);
                 setIsTimeOutModalOpen(true);
               }}
               onOpenTimeInModal={(log) => {
@@ -462,9 +470,14 @@ const MainApp: React.FC = () => {
             <InOutTracker
               logs={inOutLogs}
               employees={employees}
+              workLogs={workLogs}
+              adminEmail={admin.email}
               selectedDate={selectedDate}
               onSelectDate={(newDate) => setSelectedDate(newDate)}
-              onOpenTimeOutModal={() => setIsTimeOutModalOpen(true)}
+              onOpenTimeOutModal={() => {
+                setPreselectedEmpForTimeOut(null);
+                setIsTimeOutModalOpen(true);
+              }}
               onOpenTimeInModal={(log) => {
                 setSelectedLogForTimeIn(log || null);
                 setIsTimeInModalOpen(true);
@@ -501,15 +514,22 @@ const MainApp: React.FC = () => {
             />
           )}
         </div>
+
+        <WatermarkFooter variant="main" />
       </main>
 
       {/* ================= MODALS ================= */}
       {/* 1. Modal Catat Jam Keluar */}
       <RecordTimeOutModal
         isOpen={isTimeOutModalOpen}
-        onClose={() => setIsTimeOutModalOpen(false)}
+        onClose={() => {
+          setIsTimeOutModalOpen(false);
+          setPreselectedEmpForTimeOut(null);
+        }}
         employees={employees}
+        workLogs={workLogs}
         currentlyOutEmployeeIds={currentlyOutEmpIds}
+        preselectedEmployeeId={preselectedEmpForTimeOut}
         onSubmit={handleRecordTimeOut}
       />
 

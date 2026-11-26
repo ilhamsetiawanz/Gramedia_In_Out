@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import type { Employee, DailyWorkLog, InOutLog, WorkStatus } from '../../types';
 import { 
   Users, 
@@ -12,8 +12,9 @@ import {
 import { TodayWorkingList } from './TodayWorkingList';
 import { 
   formatIndonesianDate, 
-  calculateMinutesDiff, 
-  getCurrentTimeString
+  calculateSecondsDiff, 
+  getCurrentTimeWithSeconds,
+  formatElapsedTimer
 } from '../../utils/dateUtils';
 
 interface DashboardOverviewProps {
@@ -39,7 +40,14 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   onMarkAttendance,
   onUpdateWorkStatus,
 }) => {
-  const currentTime = getCurrentTimeString();
+  const [nowTime, setNowTime] = useState(getCurrentTimeWithSeconds());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowTime(getCurrentTimeWithSeconds());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Metrics computation
   const stats = useMemo(() => {
@@ -53,16 +61,20 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       if (l.purpose !== 'Istirahat') return false;
       const maxBreak = l.employee?.max_break_minutes || 60;
       if (l.time_in) {
-        return l.is_overdue || (l.duration_minutes || 0) > maxBreak;
+        return (
+          l.is_overdue ||
+          (l.duration_minutes || 0) > maxBreak ||
+          calculateSecondsDiff(l.time_out, l.time_in) > maxBreak * 60
+        );
       }
-      return calculateMinutesDiff(l.time_out, currentTime) > maxBreak;
+      return calculateSecondsDiff(l.time_out, nowTime) > maxBreak * 60;
     });
 
     // Currently active overdue outings
     const liveOverdueOutings = currentlyOutLogs.filter((l) => {
       if (l.purpose !== 'Istirahat') return false;
       const maxBreak = l.employee?.max_break_minutes || 60;
-      return calculateMinutesDiff(l.time_out, currentTime) > maxBreak;
+      return calculateSecondsDiff(l.time_out, nowTime) > maxBreak * 60;
     });
 
     return {
@@ -72,7 +84,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
       overdueBreaksCount: overdueList.length,
       liveOverdueOutings,
     };
-  }, [employees, workLogs, inOutLogs, currentTime]);
+  }, [employees, workLogs, inOutLogs, nowTime]);
 
   return (
     <div className="space-y-6">
@@ -86,7 +98,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             Dashboard Pemantauan Karyawan
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            {formatIndonesianDate(selectedDate)} • Waktu Server: {currentTime} WIB
+            {formatIndonesianDate(selectedDate)} • Waktu Server: <span className="font-mono font-semibold text-slate-700">{nowTime} WIB</span>
           </p>
         </div>
 
@@ -133,17 +145,22 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                 <div className="mt-1 text-xs text-amber-800 space-y-1">
                   {stats.liveOverdueOutings.map((log) => {
                     const maxBreak = log.employee?.max_break_minutes || 60;
-                    const elapsed = calculateMinutesDiff(log.time_out, currentTime);
-                    const excess = elapsed - maxBreak;
+                    const elapsedSecs = calculateSecondsDiff(log.time_out, nowTime);
+                    const excessSecs = Math.max(0, elapsedSecs - maxBreak * 60);
+                    const excessMins = Math.floor(excessSecs / 60);
+                    const excessRemSecs = excessSecs % 60;
+                    const excessLabel = excessMins > 0
+                      ? `+${excessMins} mnt${excessRemSecs > 0 ? ` ${excessRemSecs} dtk` : ''}`
+                      : `+${excessRemSecs} dtk`;
                     return (
                       <div key={log.id} className="flex items-center space-x-2">
                         <span>•</span>
                         <span>
                           <strong>{log.employee?.name}</strong> ({log.employee?.nik || log.employee?.nip} - {log.employee?.department})
-                          keluar pukul <strong>{log.time_out}</strong> (durasi: {elapsed} menit, batas: {maxBreak} menit).
+                          keluar pukul <strong>{log.time_out}</strong> (timer: <strong className="font-mono">{formatElapsedTimer(elapsedSecs)}</strong>, batas: {maxBreak} menit).
                         </span>
                         <span className="font-bold text-red-700 bg-red-100/70 px-2 py-0.5 rounded text-[11px]">
-                          Terlambat +{excess} menit
+                          Terlambat {excessLabel}
                         </span>
                       </div>
                     );

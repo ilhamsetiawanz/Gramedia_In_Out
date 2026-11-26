@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import type { Employee, InOutPurpose } from '../../types';
-import { LogOut, X, Clock, AlertCircle, Info, Lock } from 'lucide-react';
-import { getCurrentTimeString } from '../../utils/dateUtils';
+import React, { useState, useEffect, useMemo } from 'react';
+import type { Employee, InOutPurpose, DailyWorkLog } from '../../types';
+import { LogOut, X, Clock, AlertCircle, Info, Lock, CalendarCheck } from 'lucide-react';
+import { getCurrentTimeWithSeconds } from '../../utils/dateUtils';
 
 interface RecordTimeOutModalProps {
   isOpen: boolean;
   onClose: () => void;
   employees: Employee[];
+  workLogs: DailyWorkLog[];
   currentlyOutEmployeeIds: string[];
+  preselectedEmployeeId?: string | null;
   onSubmit: (employeeId: string, purpose: InOutPurpose, timeOut: string, notes: string) => Promise<void>;
 }
 
@@ -31,38 +33,62 @@ export const RecordTimeOutModal: React.FC<RecordTimeOutModalProps> = ({
   isOpen,
   onClose,
   employees,
+  workLogs,
   currentlyOutEmployeeIds,
+  preselectedEmployeeId,
   onSubmit,
 }) => {
   const [selectedEmpId, setSelectedEmpId] = useState('');
   const [purpose, setPurpose] = useState<InOutPurpose>('Istirahat');
-  const [timeOut, setTimeOut] = useState(getCurrentTimeString());
+  const [timeOut, setTimeOut] = useState(getCurrentTimeWithSeconds());
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Filter karyawan aktif yang sedang TIDAK di luar
-  const availableEmployees = employees.filter(
-    (e) => e.status === 'active' && !currentlyOutEmployeeIds.includes(e.id)
+  const workLogMap = useMemo(
+    () => new Map(workLogs.map((w) => [w.employee_id, w])),
+    [workLogs]
   );
+
+  // Filter: hanya karyawan aktif yang SUDAH melakukan Clock In (belum Clock Out) dan TIDAK sedang di luar
+  const availableEmployees = useMemo(() => {
+    return employees.filter((e) => {
+      if (e.status !== 'active') return false;
+      if (currentlyOutEmployeeIds.includes(e.id)) return false;
+      const wl = workLogMap.get(e.id);
+      return Boolean(wl && wl.status !== 'completed');
+    });
+  }, [employees, currentlyOutEmployeeIds, workLogMap]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setTimeOut(getCurrentTimeWithSeconds());
+    const interval = setInterval(() => {
+      setTimeOut(getCurrentTimeWithSeconds());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) {
-      setTimeOut(getCurrentTimeString());
       setPurpose('Istirahat');
       setNotes('');
       setError(null);
-      if (availableEmployees.length > 0) {
+      if (preselectedEmployeeId && availableEmployees.some((e) => e.id === preselectedEmployeeId)) {
+        setSelectedEmpId(preselectedEmployeeId);
+      } else if (availableEmployees.length > 0) {
         setSelectedEmpId(availableEmployees[0].id);
       } else {
         setSelectedEmpId('');
       }
     }
-  }, [isOpen, employees, currentlyOutEmployeeIds]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, preselectedEmployeeId]);
 
   if (!isOpen) return null;
 
   const selectedEmployee = employees.find((e) => e.id === selectedEmpId);
+  const selectedWorkLog = selectedEmployee ? workLogMap.get(selectedEmployee.id) : undefined;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,35 +143,55 @@ export const RecordTimeOutModal: React.FC<RecordTimeOutModalProps> = ({
           )}
 
           {availableEmployees.length === 0 ? (
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
-              Semua karyawan aktif sudah tercatat sedang berada di luar kantor atau belum ada karyawan terdaftar.
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-1.5">
+              <div className="font-bold text-amber-900">Belum Ada Karyawan yang Dapat Keluar</div>
+              <p>
+                Hanya karyawan yang sudah melakukan <strong>Clock In</strong> (dan belum Clock Out) yang dapat mencatat jam keluar. 
+                Silakan lakukan Clock In karyawan terlebih dahulu pada menu Dashboard.
+              </p>
             </div>
           ) : (
             <>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Pilih Karyawan
+                  Pilih Karyawan (Khusus yang Sudah Clock In)
                 </label>
                 <select
                   value={selectedEmpId}
                   onChange={(e) => setSelectedEmpId(e.target.value)}
                   className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
                 >
-                  {availableEmployees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.nik || emp.nip} - {emp.name} ({emp.department})
-                    </option>
-                  ))}
+                  {availableEmployees.map((emp) => {
+                    const wl = workLogMap.get(emp.id);
+                    return (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.nik || emp.nip} - {emp.name} ({emp.department}) • Clock In: {wl?.shift_start || '-'}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
               {selectedEmployee && (
-                <div className="p-2.5 bg-blue-50/70 border border-blue-100 rounded-lg text-xs text-slate-600 flex items-center justify-between">
-                  <span>Departemen: <strong>{selectedEmployee.department}</strong></span>
-                  <span className="text-blue-800 font-medium flex items-center">
-                    <Clock className="w-3.5 h-3.5 mr-1 text-blue-600" />
-                    Batas Istirahat: {selectedEmployee.max_break_minutes} Menit
-                  </span>
+                <div className="p-3 bg-blue-50/70 border border-blue-100 rounded-lg text-xs text-slate-700 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span>Departemen: <strong>{selectedEmployee.department}</strong></span>
+                    <span className="text-blue-800 font-medium flex items-center">
+                      <Clock className="w-3.5 h-3.5 mr-1 text-blue-600" />
+                      Batas Istirahat: {selectedEmployee.max_break_minutes} Menit
+                    </span>
+                  </div>
+                  {selectedWorkLog && (
+                    <div className="pt-1.5 border-t border-blue-200/70 flex items-center justify-between text-[11px]">
+                      <span className="flex items-center text-slate-600">
+                        <CalendarCheck className="w-3.5 h-3.5 mr-1 text-blue-600" />
+                        Shift: <strong className="ml-1 text-slate-800">{selectedWorkLog.shift_name || selectedWorkLog.notes || 'Shift Pagi'}</strong>
+                      </span>
+                      <span className="font-mono font-bold text-blue-800 bg-white px-2 py-0.5 rounded border border-blue-200">
+                        Clock In: {selectedWorkLog.shift_start} WIB
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 

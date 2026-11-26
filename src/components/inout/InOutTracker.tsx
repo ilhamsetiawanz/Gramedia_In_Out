@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import type { InOutLog, Employee } from '../../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import type { InOutLog, Employee, DailyWorkLog } from '../../types';
 import { 
   Clock, 
   LogOut, 
@@ -13,14 +13,18 @@ import {
 } from 'lucide-react';
 import { 
   formatDuration, 
-  calculateMinutesDiff, 
-  getCurrentTimeString,
+  calculateSecondsDiff, 
+  getCurrentTimeWithSeconds,
+  formatElapsedTimer,
   formatIndonesianDate 
 } from '../../utils/dateUtils';
+import { ConfirmDeleteLogModal } from './ConfirmDeleteLogModal';
 
 interface InOutTrackerProps {
   logs: InOutLog[];
   employees?: Employee[];
+  workLogs?: DailyWorkLog[];
+  adminEmail?: string;
   selectedDate: string;
   onSelectDate: (date: string) => void;
   onOpenTimeOutModal: () => void;
@@ -30,6 +34,8 @@ interface InOutTrackerProps {
 
 export const InOutTracker: React.FC<InOutTrackerProps> = ({
   logs,
+  workLogs = [],
+  adminEmail = 'kendari.gramediakendari.vm@gmail.com',
   selectedDate,
   onSelectDate,
   onOpenTimeOutModal,
@@ -39,8 +45,20 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'outside' | 'completed' | 'overdue'>('all');
   const [purposeFilter, setPurposeFilter] = useState<string>('all');
+  const [nowTime, setNowTime] = useState(getCurrentTimeWithSeconds());
+  const [logToDelete, setLogToDelete] = useState<InOutLog | null>(null);
 
-  const currentTime = getCurrentTimeString();
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setNowTime(getCurrentTimeWithSeconds());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const workLogMap = useMemo(
+    () => new Map(workLogs.map((w) => [w.employee_id, w])),
+    [workLogs]
+  );
 
   // Statistics for this day's logs
   const stats = useMemo(() => {
@@ -53,15 +71,19 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
       if (l.purpose !== 'Istirahat') return false;
       const maxBreak = l.employee?.max_break_minutes || 60;
       if (l.time_in) {
-        return l.is_overdue || (l.duration_minutes || 0) > maxBreak;
+        return (
+          l.is_overdue ||
+          (l.duration_minutes || 0) > maxBreak ||
+          calculateSecondsDiff(l.time_out, l.time_in) > maxBreak * 60
+        );
       }
       // Live outside check
-      const liveMinutes = calculateMinutesDiff(l.time_out, currentTime);
-      return liveMinutes > maxBreak;
+      const liveSeconds = calculateSecondsDiff(l.time_out, nowTime);
+      return liveSeconds > maxBreak * 60;
     }).length;
 
     return { total, currentlyOut, completed, overdueCount };
-  }, [logs, currentTime]);
+  }, [logs, nowTime]);
 
   const filteredLogs = useMemo(() => {
     return logs.filter((log) => {
@@ -78,8 +100,8 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
       const maxBreak = log.employee?.max_break_minutes || 60;
       const isOverdueNow = log.purpose === 'Istirahat' && (
         log.time_in 
-          ? (log.is_overdue || (log.duration_minutes || 0) > maxBreak)
-          : calculateMinutesDiff(log.time_out, currentTime) > maxBreak
+          ? (log.is_overdue || (log.duration_minutes || 0) > maxBreak || calculateSecondsDiff(log.time_out, log.time_in) > maxBreak * 60)
+          : calculateSecondsDiff(log.time_out, nowTime) > maxBreak * 60
       );
 
       if (statusFilter === 'outside') {
@@ -92,13 +114,10 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
 
       return matchSearch && matchPurpose && matchStatus;
     });
-  }, [logs, searchTerm, purposeFilter, statusFilter, currentTime]);
+  }, [logs, searchTerm, purposeFilter, statusFilter, nowTime]);
 
-  const handleDelete = async (log: InOutLog) => {
-    const name = log.employee?.name || 'karyawan ini';
-    if (window.confirm(`Hapus catatan keluar masuk ${name} (${log.time_out})?`)) {
-      await onDeleteLog(log.id);
-    }
+  const handleDelete = (log: InOutLog) => {
+    setLogToDelete(log);
   };
 
   return (
@@ -275,28 +294,38 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
               ) : (
                 filteredLogs.map((log) => {
                   const emp = log.employee;
+                  const workLog = workLogMap.get(log.employee_id);
                   const maxBreak = emp?.max_break_minutes || 60;
                   
                   // Live duration check if still outside
                   const isCurrentlyOut = !log.time_in;
-                  const currentMinutes = isCurrentlyOut 
-                    ? calculateMinutesDiff(log.time_out, currentTime)
-                    : (log.duration_minutes || 0);
+                  const elapsedSeconds = isCurrentlyOut
+                    ? calculateSecondsDiff(log.time_out, nowTime)
+                    : calculateSecondsDiff(log.time_out, log.time_in!);
+                  const currentMinutes = isCurrentlyOut
+                    ? Math.floor(elapsedSeconds / 60)
+                    : (log.duration_minutes ?? Math.floor(elapsedSeconds / 60));
 
                   const isBreak = log.purpose === 'Istirahat';
                   const isExceeded = isBreak && (
-                    log.time_in 
-                      ? (log.is_overdue || currentMinutes > maxBreak)
-                      : currentMinutes > maxBreak
+                    isCurrentlyOut
+                      ? elapsedSeconds > maxBreak * 60
+                      : (log.is_overdue || currentMinutes > maxBreak || elapsedSeconds > maxBreak * 60)
                   );
-                  const excessTime = Math.max(0, currentMinutes - maxBreak);
+                  const excessSeconds = Math.max(0, elapsedSeconds - maxBreak * 60);
+                  const excessMins = Math.floor(excessSeconds / 60);
+                  const excessRemSecs = excessSeconds % 60;
+                  const excessDisplay = excessMins > 0
+                    ? `+${excessMins} mnt${excessRemSecs > 0 ? ` ${excessRemSecs} dtk` : ''}`
+                    : `+${excessRemSecs} dtk`;
+                  const remainingSeconds = Math.max(0, maxBreak * 60 - elapsedSeconds);
 
                   return (
                     <tr 
                       key={log.id} 
                       className={`transition-colors ${
                         isExceeded 
-                          ? 'bg-amber-50/40 hover:bg-amber-50/70' 
+                          ? 'bg-red-50/40 hover:bg-red-50/70' 
                           : 'hover:bg-slate-50/70'
                       }`}
                     >
@@ -311,6 +340,11 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
                             <div className="text-[11px] text-slate-500 font-mono">
                               {emp?.nik || emp?.nip || '-'} • {emp?.department || '-'}
                             </div>
+                            {workLog && (
+                              <div className="text-[10px] text-blue-700 font-medium mt-0.5">
+                                Clock In: <span className="font-mono font-semibold">{workLog.shift_start}</span> ({workLog.shift_name || workLog.notes || 'Shift Pagi'})
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -341,12 +375,21 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
                         )}
                       </td>
 
-                      {/* Total Duration */}
+                      {/* Total Duration / Live Timer */}
                       <td className="py-3.5 px-4 text-center font-medium">
                         {isCurrentlyOut ? (
-                          <span className="text-blue-700">
-                            {formatDuration(currentMinutes)} (berjalan)
-                          </span>
+                          <div className="inline-flex flex-col items-center">
+                            <span className={`font-mono font-bold text-xs px-2 py-0.5 rounded ${
+                              isExceeded
+                                ? 'bg-red-100 text-red-700 border border-red-200'
+                                : 'bg-blue-50 text-blue-700 border border-blue-200'
+                            }`}>
+                              {formatElapsedTimer(elapsedSeconds)}
+                            </span>
+                            <span className="text-[10px] text-slate-500 mt-0.5">
+                              {formatDuration(currentMinutes)} (berjalan)
+                            </span>
+                          </div>
                         ) : (
                           <span className="text-slate-900">
                             {formatDuration(log.duration_minutes)} ({log.duration_minutes} mnt)
@@ -359,13 +402,20 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
                         {isExceeded ? (
                           <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-semibold bg-red-50 text-red-700 border border-red-200">
                             <AlertTriangle className="w-3.5 h-3.5 mr-1 text-red-600 shrink-0" />
-                            <span>Melebihi Batas (+{excessTime} mnt)</span>
+                            <span>Melebihi Batas ({excessDisplay})</span>
                           </span>
                         ) : isCurrentlyOut ? (
-                          <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
-                            <Clock className="w-3.5 h-3.5 mr-1 text-amber-600 shrink-0" />
-                            Batas: {maxBreak} mnt
-                          </span>
+                          isBreak ? (
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-medium bg-amber-50 text-amber-800 border border-amber-200">
+                              <Clock className="w-3.5 h-3.5 mr-1 text-amber-600 shrink-0" />
+                              Sisa: <span className="font-mono font-semibold ml-1">{formatElapsedTimer(remainingSeconds)}</span> / {maxBreak} mnt
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                              <Clock className="w-3.5 h-3.5 mr-1 text-blue-600 shrink-0" />
+                              Sedang Berjalan
+                            </span>
+                          )
                         ) : (
                           <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
                             <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600 shrink-0" />
@@ -403,9 +453,18 @@ export const InOutTracker: React.FC<InOutTrackerProps> = ({
         </div>
         <div className="p-3 bg-slate-50 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between">
           <span>Menampilkan {filteredLogs.length} dari {logs.length} catatan keluar-masuk</span>
-          <span>Waktu server lokal: {currentTime}</span>
+          <span>Waktu server lokal: <span className="font-mono font-semibold">{nowTime}</span> WIB</span>
         </div>
       </div>
+
+      {/* Modal Verifikasi Password Akun sebelum Menghapus Data */}
+      <ConfirmDeleteLogModal
+        isOpen={Boolean(logToDelete)}
+        log={logToDelete}
+        adminEmail={adminEmail}
+        onClose={() => setLogToDelete(null)}
+        onConfirmDelete={onDeleteLog}
+      />
     </div>
   );
 };

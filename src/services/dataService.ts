@@ -1,7 +1,12 @@
 import type { Employee, InOutLog, DailyWorkLog, InOutPurpose, WorkStatus } from '../types';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 import { INITIAL_EMPLOYEES, getInitialWorkLogs, getInitialInOutLogs } from './mockData';
-import { calculateMinutesDiff, getTodayDateString, getCurrentTimeString } from '../utils/dateUtils';
+import { 
+  calculateSecondsDiff, 
+  getTodayDateString, 
+  getCurrentTimeString, 
+  getCurrentTimeWithSeconds 
+} from '../utils/dateUtils';
 
 const STORAGE_KEY_EMPLOYEES = 'gramedia_employees';
 const STORAGE_KEY_INOUT = 'gramedia_inout_logs';
@@ -131,20 +136,41 @@ export async function addEmployee(employee: Omit<Employee, 'id' | 'created_at'>)
 }
 
 export async function updateEmployee(id: string, updates: Partial<Employee>): Promise<Employee> {
+  // Hanya kirim kolom yang valid di skema tabel Supabase (hapus nip, id, created_at)
+  const dbPayload: Record<string, unknown> = {};
+  if (updates.nik !== undefined || updates.nip !== undefined) {
+    dbPayload.nik = (updates.nik || updates.nip || '').trim().toUpperCase();
+  }
+  if (updates.name !== undefined) dbPayload.name = updates.name.trim();
+  if (updates.department !== undefined) dbPayload.department = updates.department;
+  if (updates.max_break_minutes !== undefined) dbPayload.max_break_minutes = Number(updates.max_break_minutes);
+  if (updates.status !== undefined) dbPayload.status = updates.status;
+
   const supabase = getSupabaseClient();
   if (isSupabaseConfigured() && supabase) {
-    try {
-      const { data, error } = await supabase
-        .from('employees')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single();
-      if (!error && data) {
-        return data as Employee;
+    const { data, error } = await supabase
+      .from('employees')
+      .update(dbPayload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Supabase update employee error:', error);
+      throw new Error(`Gagal memperbarui data karyawan: ${error.message}`);
+    }
+
+    if (data) {
+      const normalized: Employee = {
+        ...data,
+        nik: data.nik || data.nip || '-',
+        nip: data.nik || data.nip || '-',
+      };
+      const local = loadLocal<Employee[]>(STORAGE_KEY_EMPLOYEES, []);
+      if (local.length > 0) {
+        saveLocal(STORAGE_KEY_EMPLOYEES, local.map((emp) => (emp.id === id ? normalized : emp)));
       }
-    } catch (e) {
-      console.warn('Supabase update failed, updating local', e);
+      return normalized;
     }
   }
 
@@ -359,7 +385,7 @@ export async function getInOutLogs(dateStr: string = getTodayDateString()): Prom
 export async function recordTimeOut(
   employeeId: string,
   purpose: InOutPurpose,
-  timeOutStr: string = getCurrentTimeString(),
+  timeOutStr: string = getCurrentTimeWithSeconds(),
   notes: string = '',
   dateStr: string = getTodayDateString()
 ): Promise<InOutLog> {
@@ -441,7 +467,7 @@ export async function recordTimeOut(
 
 export async function recordTimeIn(
   logId: string,
-  timeInStr: string = getCurrentTimeString()
+  timeInStr: string = getCurrentTimeWithSeconds()
 ): Promise<InOutLog> {
   const employees = await getEmployees();
   const empMap = new Map(employees.map((e) => [e.id, e]));
@@ -460,8 +486,9 @@ export async function recordTimeIn(
         const parsed = parsePurposeAndNotes(actualLog.purpose, actualLog.notes);
         const emp = empMap.get(actualLog.employee_id);
         const maxBreak = emp ? emp.max_break_minutes : 60;
-        const duration = calculateMinutesDiff(actualLog.time_out, timeInStr);
-        const isOverdue = parsed.purpose === 'Istirahat' && duration > maxBreak;
+        const elapsedSeconds = calculateSecondsDiff(actualLog.time_out, timeInStr);
+        const duration = Math.floor(elapsedSeconds / 60);
+        const isOverdue = parsed.purpose === 'Istirahat' && elapsedSeconds > maxBreak * 60;
 
         const { data, error } = await supabase
           .from('in_out_logs')
@@ -494,8 +521,9 @@ export async function recordTimeIn(
   const parsedTarget = parsePurposeAndNotes(target.purpose, target.notes);
   const emp = empMap.get(target.employee_id);
   const maxBreak = emp ? emp.max_break_minutes : 60;
-  const duration = calculateMinutesDiff(target.time_out, timeInStr);
-  const isOverdue = parsedTarget.purpose === 'Istirahat' && duration > maxBreak;
+  const elapsedSeconds = calculateSecondsDiff(target.time_out, timeInStr);
+  const duration = Math.floor(elapsedSeconds / 60);
+  const isOverdue = parsedTarget.purpose === 'Istirahat' && elapsedSeconds > maxBreak * 60;
 
   const updatedLogs = allLogs.map((l) => {
     if (l.id === logId) {

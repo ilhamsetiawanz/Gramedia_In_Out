@@ -50,15 +50,12 @@ export const RecordTimeOutModal: React.FC<RecordTimeOutModalProps> = ({
     [workLogs]
   );
 
-  // Filter: hanya karyawan aktif yang SUDAH melakukan Clock In (belum Clock Out) dan TIDAK sedang di luar
+  // Filter: semua karyawan aktif yang sedang TIDAK di luar (tanpa syarat harus Clock In dulu)
   const availableEmployees = useMemo(() => {
-    return employees.filter((e) => {
-      if (e.status !== 'active') return false;
-      if (currentlyOutEmployeeIds.includes(e.id)) return false;
-      const wl = workLogMap.get(e.id);
-      return Boolean(wl && wl.status !== 'completed');
-    });
-  }, [employees, currentlyOutEmployeeIds, workLogMap]);
+    return employees.filter(
+      (e) => e.status === 'active' && !currentlyOutEmployeeIds.includes(e.id)
+    );
+  }, [employees, currentlyOutEmployeeIds]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -143,18 +140,14 @@ export const RecordTimeOutModal: React.FC<RecordTimeOutModalProps> = ({
           )}
 
           {availableEmployees.length === 0 ? (
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 space-y-1.5">
-              <div className="font-bold text-amber-900">Belum Ada Karyawan yang Dapat Keluar</div>
-              <p>
-                Hanya karyawan yang sudah melakukan <strong>Clock In</strong> (dan belum Clock Out) yang dapat mencatat jam keluar. 
-                Silakan lakukan Clock In karyawan terlebih dahulu pada menu Dashboard.
-              </p>
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+              Semua karyawan aktif sudah tercatat sedang berada di luar kantor atau belum ada karyawan terdaftar.
             </div>
           ) : (
             <>
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Pilih Karyawan (Khusus yang Sudah Clock In)
+                  Pilih Karyawan
                 </label>
                 <select
                   value={selectedEmpId}
@@ -165,7 +158,7 @@ export const RecordTimeOutModal: React.FC<RecordTimeOutModalProps> = ({
                     const wl = workLogMap.get(emp.id);
                     return (
                       <option key={emp.id} value={emp.id}>
-                        {emp.nik || emp.nip} - {emp.name} ({emp.department}) • Clock In: {wl?.shift_start || '-'}
+                        {emp.nik || emp.nip} - {emp.name} ({emp.department}){wl ? ` • Clock In: ${wl.shift_start}` : ''}
                       </option>
                     );
                   })}
